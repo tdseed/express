@@ -1,3 +1,29 @@
+// bind polyfill
+if (!Function.prototype.bind) {
+  Function.prototype.bind = function (oThis) {
+    if (typeof this !== "function") {
+      // closest thing possible to the ECMAScript 5 internal IsCallable function
+      throw new TypeError("Function.prototype.bind - what is trying to be bound is not callable");
+    }
+
+    var fSlice = Array.prototype.slice,
+        aArgs = fSlice.call(arguments, 1), 
+        fToBind = this, 
+        fNOP = function () {},
+        fBound = function () {
+          return fToBind.apply(this instanceof fNOP
+                                 ? this
+                                 : oThis || window,
+                               aArgs.concat(fSlice.call(arguments)));
+        };
+
+    fNOP.prototype = this.prototype;
+    fBound.prototype = new fNOP();
+
+    return fBound;
+  };
+}
+
 (function() {
   var doc = document;
   var disableBuilds = false;
@@ -130,7 +156,9 @@
   var Slide = function(node, idx) {
     this._node = node;
     var note = query('.note > section', node);
-    this._speakerNote = note ? note.innerHTML : '';
+    if (this._speakerNote) {
+      this._speakerNote = note ? note.innerHTML : '';
+    }
     if (idx >= 0) {
       this._count = idx + 1;
     }
@@ -324,6 +352,7 @@
     _speakerNote: query('#speaker-note'),
     _help: query('#help'),
     _slides: [],
+    _themes: queryAll('.theme'),
     _getCurrentIndex: function() {
       var me = this;
       var slideCount = null;
@@ -357,13 +386,15 @@
       }
       var docElem = document.documentElement;
       var elem = document.elementFromPoint( docElem.clientWidth / 2, docElem.clientHeight / 2);
-      if (elem && elem.className != 'presentation') {
+      if (elem && elem.className != 'slides') {
         this._presentationCounter.textContent = currentIndex;
         if (this._menuCounter) {
           this._menuCounter.textContent = currentIndex;          
         }
       }
-      this._speakerNote.innerHTML = this._slides[currentIndex - 1].getSpeakerNote();
+      if (this._speakerNote) {
+        this._speakerNote.innerHTML = this._slides[currentIndex - 1].getSpeakerNote();        
+      }
       if (history.pushState) {
         if (!dontPush) {
           history.pushState(this.current, 'Slide ' + this.current, '#' + this.current);
@@ -387,7 +418,7 @@
       }
     },
     prev: function() {
-      var prev = query('.slide:nth-child(' + (this._getCurrentIndex() - 1) + ')');
+      var prev = query('.slide:nth-child(' + (this._getCurrentIndex()) + ')');
       //this.current = (prev) ? prev.id : this.current;
       this._update((prev) ? prev.id : this.current);
     },
@@ -400,8 +431,10 @@
       if (disableNotes) {
         return;
       }
-      this._speakerNote.style.display = "block";
-      this._speakerNote.classList.toggle('invisible');
+      if (this._speakerNote) {
+        this._speakerNote.style.display = 'block';
+        this._speakerNote.classList.toggle('invisible');
+      }
     },
     switch3D: function() {
       toggleClass(document.body, 'three-d');
@@ -412,19 +445,17 @@
       sessionStorage['highlightOn'] = !link.disabled;
     },
     changeTheme: function() {
-      var linkEls = queryAll('link.theme');
       var sheetIndex = 0;
-      linkEls.forEach(function(stylesheet, i) {
-        if (!stylesheet.disabled) {
-          sheetIndex = i;
-        }
-      });
-      linkEls[sheetIndex].disabled = true;
-      linkEls[(sheetIndex + 1) % linkEls.length].disabled = false;
-      sessionStorage['theme'] = linkEls[(sheetIndex + 1) % linkEls.length].href;
+      while (this._themes[sheetIndex].disabled) {
+        sheetIndex++;
+      }
+      this._themes[sheetIndex].disabled = true;
+      var nextSheet = this._themes[(sheetIndex + 1) % this._themes.length];
+      nextSheet.disabled = false;
+      sessionStorage['theme'] = nextSheet.getAttribute('href').split('/').pop();
     },
     toggleHelp: function() {
-      this._help.style.display = "block";
+      this._help.style.display = 'block';
       this._help.classList.toggle('invisible');
     },
     viewSource: function() {
@@ -500,11 +531,11 @@
 
   // disable style theme stylesheets
   var linkEls = queryAll('link.theme');
-  var stylesheetPath = sessionStorage['theme'] || 'css/default.css';
+  var stylesheetPath = sessionStorage['theme'] || 'styles/default.css';
   linkEls.forEach(function(stylesheet) {
     stylesheet.disabled = !(stylesheet.href.indexOf(stylesheetPath) != -1);
   });
-
+        
   // Initialize
   var li_array = [];
   var transitionSlides = queryAll('.transitionSlide').forEach(function(el) {
@@ -515,17 +546,21 @@
                  );
   });
 
-  query('#toc-list').innerHTML = li_array.join('');
-
   var slideshow = new SlideShow(queryAll('.slide'));
   
   document.addEventListener('DOMContentLoaded', function() {
     query('.slides').style.display = 'block';
   }, false);
 
-  queryAll('#toc-list li a').forEach(function(el) {
-      el.onclick = function() { slideshow.go(el.dataset['hash']); };
-  });
+  var toc_list = query('#toc-list');
+  if (toc_list) {
+    toc_list.innerHTML = li_array.join('');
+    queryAll('li a', toc_list).forEach(function(el) {
+      el.onclick = function() {
+          slideshow.go(el.dataset['hash']);
+      };
+    });
+  }
 
   queryAll('pre').forEach(function(el) {
     addClass(el, 'prettyprint');
